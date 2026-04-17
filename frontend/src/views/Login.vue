@@ -21,11 +21,14 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const formRef = ref()
 const loading = ref(false)
 const form = reactive({ username: '', password: '' })
@@ -39,6 +42,8 @@ async function handleLogin() {
   loading.value = true
   try {
     await auth.login(form)
+    const redirect = route.query.redirect || '/dashboard'
+    router.push(redirect)
   } catch {
     ElMessage.error('登录失败，请检查账号密码')
   } finally {

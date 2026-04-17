@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
-import router from '@/router'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token') || '')
@@ -9,22 +8,32 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
+  function _persist(t, u) {
+    token.value = t
+    userInfo.value = u
+    localStorage.setItem('token', t)
+    localStorage.setItem('userInfo', JSON.stringify(u))
+  }
+
   async function login(credentials) {
     const { data } = await authApi.login(credentials)
-    token.value = data.token
-    userInfo.value = data.user
-    localStorage.setItem('token', data.token)
-    localStorage.setItem('userInfo', JSON.stringify(data.user))
-    router.push('/')
+    _persist(data.token, data.user)
+    // 跳转由调用方负责，避免双重路由竞争
   }
+
+  // 兼容旧调用（login 别名）
+  const loginOnly = login
 
   function logout() {
     token.value = ''
     userInfo.value = null
     localStorage.removeItem('token')
     localStorage.removeItem('userInfo')
-    router.push('/login')
+    // 跳转由路由守卫或调用方负责
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
   }
 
-  return { token, userInfo, isLoggedIn, login, logout }
+  return { token, userInfo, isLoggedIn, login, loginOnly, logout }
 })

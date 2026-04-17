@@ -20,7 +20,7 @@
         </el-sub-menu>
 
         <el-menu-item v-if="hasRole(['admin'])" index="/faces">
-          <el-icon><Camera /></el-icon><span>人脸数据</span>
+          <el-icon><Camera /></el-icon><span>人脸数据管理</span>
         </el-menu-item>
 
         <el-sub-menu index="attendance">

@@ -6,5 +6,5 @@ export const reportsApi = {
     request.get(`/reports/student/${studentId}`),
   export: (params) =>
     request.get('/reports/export', { params, responseType: 'blob' }),
-  warnings: () => request.get('/reports/warnings'),
+  warnings: () => request.get('/reports/warnings', { silent: true }),
 }
