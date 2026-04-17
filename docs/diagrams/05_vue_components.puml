@@ -1,0 +1,150 @@
+@startuml 05_Vue前端组件类图
+!pragma layout smetana
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classBackgroundColor #FFF0FF
+skinparam classBorderColor #663366
+skinparam arrowColor #442244
+skinparam packageBackgroundColor #FFE8FF
+hide empty members
+
+title Vue前端组件关系图
+
+class App {
+  +setup(): void
+}
+
+class Router {
+  +routes: RouteRecord[]
+  --
+  +beforeEach(guard): void
+}
+
+package "Pinia Store" {
+  class AuthStore {
+    +token: string
+    +userInfo: UserInfo
+    +isLoggedIn: bool
+    --
+    +login(credentials): Promise
+    +logout(): void
+    +fetchUserInfo(): Promise
+  }
+
+  class AttendanceStore {
+    +currentTask: Task
+    +recognitionResults: Result[]
+    +isRunning: bool
+    --
+    +startTask(taskId): Promise
+    +stopTask(taskId): Promise
+    +addResult(result): void
+  }
+}
+
+package "工具类" {
+  class RequestUtil {
+    -axiosInstance: AxiosInstance
+    --
+    +get(url, params): Promise
+    +post(url, data): Promise
+    +put(url, data): Promise
+    +delete(url): Promise
+    -requestInterceptor(): void
+    -responseInterceptor(): void
+  }
+}
+
+package "页面组件 Views" {
+  class LoginView {
+    -form: LoginForm
+    --
+    +handleLogin(): void
+    +validateForm(): bool
+  }
+
+  class DashboardView {
+    -stats: DashboardStats
+    --
+    +fetchStats(): void
+    +renderCharts(): void
+  }
+
+  class StudentListView {
+    -students: Student[]
+    -pagination: Pagination
+    -searchForm: SearchForm
+    --
+    +fetchStudents(): void
+    +handleDelete(id): void
+    +handleImport(): void
+  }
+
+  class StudentFormView {
+    -form: StudentForm
+    -isEdit: bool
+    --
+    +submitForm(): void
+    +validateForm(): bool
+  }
+
+  class FaceCaptureView {
+    -student: Student
+    -capturedImages: Image[]
+    -videoStream: MediaStream
+    --
+    +startCamera(): void
+    +capture(): void
+    +uploadImages(): void
+    +stopCamera(): void
+  }
+
+  class AttendanceTaskView {
+    -task: Task
+    -videoStream: MediaStream
+    -wsConnection: WebSocket
+    -recognizedList: Student[]
+    --
+    +startAttendance(): void
+    +stopAttendance(): void
+    +initWebSocket(): void
+    +handleRecognitionResult(data): void
+  }
+
+  class AttendanceListView {
+    -records: Record[]
+    -filters: FilterForm
+    -pagination: Pagination
+    --
+    +fetchRecords(): void
+    +handleVerify(id): void
+    +exportExcel(): void
+  }
+
+  class ReportView {
+    -chartData: ChartData
+    -tableData: TableData
+    -filters: FilterForm
+    --
+    +fetchStats(): void
+    +renderLineChart(): void
+    +renderBarChart(): void
+    +exportReport(): void
+  }
+}
+
+App --> Router : uses
+App --> AuthStore : uses
+LoginView --> AuthStore : calls login
+AttendanceTaskView --> AttendanceStore : uses
+Router --> AuthStore : route guards use
+
+DashboardView --> RequestUtil : calls API
+StudentListView --> RequestUtil : calls API
+StudentFormView --> RequestUtil : calls API
+FaceCaptureView --> RequestUtil : calls API
+AttendanceTaskView --> RequestUtil : calls API
+AttendanceListView --> RequestUtil : calls API
+ReportView --> RequestUtil : calls API
+
+@enduml

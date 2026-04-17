@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+backend/.venv/
+backend/venv/
+*.venv
+
+# 环境变量（含密码，不入库）
+backend/.env
+frontend/.env
+
+# Flask-Migrate（自动生成，建议入库；如不需要可取消注释）
+# backend/migrations/
+
+# 数据库
+*.db
+*.sqlite3
+
+# 模型权重与特征库（体积大，不入库）
+backend/model/checkpoints/
+backend/model/features.npy
+backend/model/*.npy
+
+# 人脸图片数据集（隐私数据，不入库）
+backend/dataset/
+
+# Node.js
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+
+# 日志
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+
+# 临时文件
+/tmp/
+*.tmp

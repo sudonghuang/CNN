@@ -1,0 +1,145 @@
+@startuml 01_数据模型类图
+!pragma layout smetana
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classBackgroundColor #FAFAFA
+skinparam classBorderColor #666666
+skinparam arrowColor #444444
+skinparam packageBackgroundColor #EEF4FF
+hide empty members
+
+title 数据模型类图（SQLAlchemy ORM）
+
+enum RoleEnum {
+  ADMIN
+  TEACHER
+  COUNSELOR
+  STUDENT
+}
+
+enum TaskStatusEnum {
+  PENDING
+  RUNNING
+  FINISHED
+}
+
+enum AttendStatusEnum {
+  PRESENT
+  ABSENT
+  UNVERIFIED
+}
+
+class User {
+  +int id
+  +str username
+  +str password_hash
+  +RoleEnum role
+  +str real_name
+  +str email
+  +bool is_active
+  +datetime created_at
+  +datetime updated_at
+  --
+  +check_password(password: str): bool
+  +set_password(password: str): None
+  +to_dict(): dict
+}
+
+class Student {
+  +int id
+  +str student_id
+  +str name
+  +str class_name
+  +str department
+  +int user_id
+  +bool face_registered
+  +int face_count
+  +datetime created_at
+  --
+  +to_dict(): dict
+  +get_attendance_rate(course_id: int): float
+}
+
+class Course {
+  +int id
+  +str course_name
+  +str course_code
+  +int teacher_id
+  +str classroom
+  +str schedule
+  +datetime created_at
+  --
+  +to_dict(): dict
+  +get_enrolled_students(): List<Student>
+}
+
+class StudentCourse {
+  +int id
+  +int student_id
+  +int course_id
+  +str semester
+}
+
+class AttendanceTask {
+  +int id
+  +int course_id
+  +int teacher_id
+  +date task_date
+  +datetime start_time
+  +datetime end_time
+  +TaskStatusEnum status
+  +int total_students
+  +int present_count
+  +str model_version
+  +datetime created_at
+  --
+  +start(): None
+  +stop(): None
+  +get_attendance_rate(): float
+  +to_dict(): dict
+}
+
+class AttendanceRecord {
+  +int id
+  +int task_id
+  +int student_id
+  +AttendStatusEnum status
+  +float confidence
+  +datetime recognized_at
+  +int verified_by
+  +str note
+  --
+  +to_dict(): dict
+  +verify(operator_id: int, new_status: str): None
+}
+
+class FaceImage {
+  +int id
+  +int student_id
+  +str file_path
+  +bool is_processed
+  +datetime created_at
+  --
+  +get_full_path(): str
+  +to_dict(): dict
+}
+
+' Relationships
+User "1" --> "0..*" AttendanceTask : creates (as teacher)
+User "1" --> "0..*" Course : teaches
+User "1" --> "0..1" Student : account binding
+
+Student "N" -- "M" Course : enrolls
+StudentCourse ..> Student : references
+StudentCourse ..> Course : references
+
+Course "1" --> "0..*" AttendanceTask : has tasks
+AttendanceTask "1" --> "0..*" AttendanceRecord : contains
+Student "1" --> "0..*" AttendanceRecord : attendance of
+Student "1" --> "0..*" FaceImage : has
+
+User ..> RoleEnum : uses
+AttendanceTask ..> TaskStatusEnum : uses
+AttendanceRecord ..> AttendStatusEnum : uses
+
+@enduml

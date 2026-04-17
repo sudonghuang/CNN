@@ -1,0 +1,98 @@
+@startuml 04_Flask_API层类图
+!pragma layout smetana
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classBackgroundColor #F0FFF0
+skinparam classBorderColor #336633
+skinparam arrowColor #224422
+skinparam packageBackgroundColor #E8FFE8
+hide empty members
+
+title Flask API层类图（Blueprint架构）
+
+class FlaskApp {
+  +app: Flask
+  +db: SQLAlchemy
+  +jwt: JWTManager
+  +cors: CORS
+  --
+  +create_app(config: str): Flask
+  +register_blueprints(): None
+  +init_extensions(): None
+}
+
+class JWTMiddleware {
+  +require_auth(f: Callable): Callable
+  +require_role(roles: list): Callable
+  +get_current_user(): User
+}
+
+package "Blueprint: /api/auth" {
+  class AuthBlueprint {
+    +login(): Response
+    +logout(): Response
+    +change_password(): Response
+    -_validate_login_input(data: dict): bool
+  }
+}
+
+package "Blueprint: /api/students" {
+  class StudentBlueprint {
+    +list_students(): Response
+    +create_student(): Response
+    +get_student(id: int): Response
+    +update_student(id: int): Response
+    +delete_student(id: int): Response
+    +import_students(): Response
+  }
+}
+
+package "Blueprint: /api/faces" {
+  class FaceBlueprint {
+    +upload_faces(student_id: int): Response
+    +capture_face(student_id: int): Response
+    +list_faces(student_id: int): Response
+    +delete_face(image_id: int): Response
+    +trigger_training(): Response
+  }
+}
+
+package "Blueprint: /api/attendance" {
+  class AttendanceBlueprint {
+    +create_task(): Response
+    +list_tasks(): Response
+    +start_task(task_id: int): Response
+    +stop_task(task_id: int): Response
+    +recognize_frame(task_id: int): Response
+    +list_records(): Response
+    +update_record(record_id: int): Response
+  }
+}
+
+package "Blueprint: /api/reports" {
+  class ReportBlueprint {
+    +course_stats(course_id: int): Response
+    +student_history(student_id: int): Response
+    +export_excel(): Response
+    +get_warnings(): Response
+  }
+}
+
+FlaskApp --> AuthBlueprint : registers
+FlaskApp --> StudentBlueprint : registers
+FlaskApp --> FaceBlueprint : registers
+FlaskApp --> AttendanceBlueprint : registers
+FlaskApp --> ReportBlueprint : registers
+
+AuthBlueprint --> AuthService : calls
+StudentBlueprint --> StudentService : calls
+FaceBlueprint --> FaceService : calls
+AttendanceBlueprint --> AttendanceService : calls
+ReportBlueprint --> ReportService : calls
+
+StudentBlueprint --> JWTMiddleware : protected by
+FaceBlueprint --> JWTMiddleware : protected by
+AttendanceBlueprint --> JWTMiddleware : protected by
+ReportBlueprint --> JWTMiddleware : protected by
+
+@enduml

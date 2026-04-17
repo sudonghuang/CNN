@@ -1,0 +1,66 @@
+@startuml 02_服务层类图
+!pragma layout smetana
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classBackgroundColor #FAFAFA
+skinparam classBorderColor #666666
+skinparam arrowColor #444444
+hide empty members
+
+title 后端服务层类图（Business Logic Layer）
+
+class AuthService {
+  +login(username: str, password: str): dict
+  +logout(user_id: int): None
+  +change_password(user_id: int, old_pw: str, new_pw: str): bool
+  +generate_token(user: User): str
+  +verify_token(token: str): User
+}
+
+class StudentService {
+  +get_students(page: int, per_page: int, filters: dict): Pagination
+  +get_student_by_id(student_id: int): Student
+  +create_student(data: dict): Student
+  +update_student(student_id: int, data: dict): Student
+  +delete_student(student_id: int): None
+  +import_from_excel(file_path: str): tuple
+  +get_face_status_summary(): dict
+}
+
+class AttendanceService {
+  +create_task(course_id: int, teacher_id: int, task_date: date): AttendanceTask
+  +start_task(task_id: int): None
+  +stop_task(task_id: int): None
+  +process_frame(task_id: int, image_data: bytes): list
+  +get_records(filters: dict, page: int, per_page: int): Pagination
+  +update_record(record_id: int, status: str, operator_id: int): AttendanceRecord
+  +mark_absent_students(task_id: int): int
+}
+
+class ReportService {
+  +get_course_stats(course_id: int, date_range: tuple): dict
+  +get_student_history(student_id: int): list
+  +export_excel(filters: dict): bytes
+  +get_warnings(): list
+  +check_and_generate_warnings(): None
+}
+
+class FaceService {
+  +upload_face_images(student_id: int, files: list): list
+  +capture_face(student_id: int, image_data: bytes): FaceImage
+  +preprocess_image(file_path: str): str
+  +trigger_training(model_type: str): bool
+  +get_face_images(student_id: int): list
+  +delete_face_image(image_id: int): None
+}
+
+' Model references (dashed)
+AuthService ..> User : manages
+StudentService ..> Student : manages
+AttendanceService ..> AttendanceTask : manages
+AttendanceService ..> AttendanceRecord : manages
+ReportService ..> AttendanceRecord : queries
+FaceService ..> FaceImage : manages
+FaceService ..> Student : updates face_count
+
+@enduml

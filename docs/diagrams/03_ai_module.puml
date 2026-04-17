@@ -1,0 +1,174 @@
+@startuml 03_AI模块类图
+!pragma layout smetana
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classBackgroundColor #FFF8EE
+skinparam classBorderColor #CC8800
+skinparam arrowColor #884400
+skinparam packageBackgroundColor #FFF3DD
+hide empty members
+
+title AI推理模块类图
+
+package "检测层" {
+  class FaceDetector {
+    -mtcnn: MTCNN
+    -min_face_size: int
+    -thresholds: list
+    --
+    +__init__(min_face_size: int)
+    +detect(image: ndarray): list<BoundingBox>
+    +detect_batch(images: list): list
+  }
+
+  class BoundingBox {
+    +x1: int
+    +y1: int
+    +x2: int
+    +y2: int
+    +confidence: float
+    +landmarks: ndarray
+    --
+    +to_crop_coords(padding: int): tuple
+  }
+}
+
+package "预处理层" {
+  class Preprocessor {
+    -target_size: tuple
+    -mean: list
+    -std: list
+    --
+    +__init__(target_size: tuple)
+    +crop_face(image: ndarray, bbox: BoundingBox, padding: int): ndarray
+    +resize(image: ndarray): ndarray
+    +normalize(image: ndarray): ndarray
+    +to_tensor(image: ndarray): Tensor
+    +preprocess(image: ndarray, bbox: BoundingBox): Tensor
+  }
+}
+
+package "特征提取层" {
+  abstract class BaseBackbone {
+    {abstract} +forward(x: Tensor): Tensor
+  }
+
+  class VGG16Backbone {
+    -features: Sequential
+    -avgpool: AdaptiveAvgPool2d
+    -embedding: Linear
+    --
+    +forward(x: Tensor): Tensor
+  }
+
+  class ResNet50Backbone {
+    -conv1_to_layer4: Sequential
+    -avgpool: AdaptiveAvgPool2d
+    -embedding: Linear
+    --
+    +forward(x: Tensor): Tensor
+  }
+
+  class FaceRecognizer {
+    -model: Module
+    -model_type: str
+    -device: device
+    --
+    +__init__(model_type: str, weights_path: str)
+    +extract_features(face_tensor: Tensor): ndarray
+    +extract_features_batch(tensors: list): ndarray
+    -_build_model(model_type: str): Module
+    -_remove_classifier(model: Module): Module
+  }
+}
+
+package "匹配层" {
+  class FeatureDatabase {
+    -db: dict
+    -student_ids: list
+    -feature_matrix: ndarray
+    --
+    +load_from_file(path: str): None
+    +save_to_file(path: str): None
+    +add_student(student_id: str, features: list): None
+    +remove_student(student_id: str): None
+    +query(query_vec: ndarray, top_k: int): list
+    +rebuild_matrix(): None
+  }
+}
+
+package "管理层" {
+  class ModelManager {
+    -recognizer: FaceRecognizer
+    -detector: FaceDetector
+    -preprocessor: Preprocessor
+    -feature_db: FeatureDatabase
+    -current_model_version: str
+    -similarity_threshold: float
+    -unverified_threshold: float
+    --
+    +__init__(config: dict)
+    +recognize_faces(image: ndarray): list<RecognitionResult>
+    +load_model(model_type: str, weights_path: str): None
+    +reload_feature_db(): None
+    +get_model_info(): dict
+  }
+
+  class RecognitionResult {
+    +student_id: str
+    +student_name: str
+    +confidence: float
+    +status: str
+    +bbox: BoundingBox
+    --
+    +to_dict(): dict
+  }
+
+  class ModelTrainer {
+    -model_type: str
+    -dataset_path: str
+    -learning_rate: float
+    -batch_size: int
+    -epochs: int
+    -device: device
+    --
+    +__init__(model_type: str, config: dict)
+    +prepare_dataset(): tuple
+    +train(): TrainingResult
+    +evaluate(dataloader: DataLoader): dict
+    +save_checkpoint(path: str): None
+    +extract_all_features(dataloader: DataLoader): dict
+  }
+
+  class TrainingResult {
+    +model_type: str
+    +best_accuracy: float
+    +best_epoch: int
+    +train_history: list
+    +val_history: list
+    +weights_path: str
+    --
+    +to_dict(): dict
+  }
+}
+
+' Relationships
+BaseBackbone <|-- VGG16Backbone
+BaseBackbone <|-- ResNet50Backbone
+
+FaceDetector ..> BoundingBox : returns
+Preprocessor ..> BoundingBox : takes as input
+FaceRecognizer --> VGG16Backbone : creates (if vgg16)
+FaceRecognizer --> ResNet50Backbone : creates (if resnet50)
+
+ModelManager --> FaceDetector : uses
+ModelManager --> Preprocessor : uses
+ModelManager --> FaceRecognizer : uses
+ModelManager --> FeatureDatabase : uses
+ModelManager ..> RecognitionResult : returns
+
+ModelTrainer --> FaceRecognizer : evaluates
+ModelTrainer --> FeatureDatabase : builds
+ModelTrainer ..> TrainingResult : returns
+
+@enduml
