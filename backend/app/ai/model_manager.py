@@ -27,15 +27,16 @@ class ModelManager:
         self.preprocessor = Preprocessor()
         self.feature_db = FeatureDatabase()
 
-        weights_path = self._find_latest_weights(config)
+        weights_path, num_classes = self._find_latest_weights(config)
         try:
             self.recognizer = FaceRecognizer(
                 model_type=config.get("model_type", "resnet50"),
                 weights_path=weights_path,
                 device=config.get("device", "cpu"),
+                num_classes=num_classes,
             )
-            logger.info("FaceRecognizer loaded (model=%s, weights=%s)",
-                        config.get("model_type"), weights_path)
+            logger.info("FaceRecognizer loaded (model=%s, weights=%s, classes=%d)",
+                        config.get("model_type"), weights_path, num_classes)
         except Exception as e:
             logger.warning("FaceRecognizer init failed: %s — inference disabled", e)
             self.recognizer = None
@@ -76,6 +77,23 @@ class ModelManager:
             self.feature_db = new_db
         logger.info("FeatureDatabase reloaded: %d students", len(new_db))
 
+    def reload_recognizer(self) -> None:
+        """训练完成后重新加载识别器（更新权重和 num_classes）"""
+        from app.ai.face_recognizer import FaceRecognizer
+        weights_path, num_classes = self._find_latest_weights(self.config)
+        try:
+            new_rec = FaceRecognizer(
+                model_type=self.config.get("model_type", "resnet50"),
+                weights_path=weights_path,
+                device=self.config.get("device", "cpu"),
+                num_classes=num_classes,
+            )
+            with self._model_lock:
+                self.recognizer = new_rec
+            logger.info("FaceRecognizer reloaded (classes=%d)", num_classes)
+        except Exception as e:
+            logger.error("FaceRecognizer reload failed: %s", e)
+
     def recognize_faces(self, image: np.ndarray) -> List[dict]:
         """
         端到端识别：BGR 图像 → [RecognitionResult, ...]
@@ -112,10 +130,22 @@ class ModelManager:
         }
 
     @staticmethod
-    def _find_latest_weights(config: dict) -> Optional[str]:
-        import os, glob
+    def _find_latest_weights(config: dict) -> tuple:
+        """返回 (weights_path_or_None, num_classes)"""
+        import os, glob, json
         ckpt_dir = config.get("checkpoint_dir", "")
         model_type = config.get("model_type", "resnet50")
         pattern = os.path.join(ckpt_dir, f"{model_type}_*.pth")
         files = sorted(glob.glob(pattern))
-        return files[-1] if files else None
+        weights_path = files[-1] if files else None
+
+        num_classes = 2  # 缺省占位（strict=False 加载时分类头权重会被忽略）
+        if weights_path:
+            meta_path = os.path.join(ckpt_dir, f"{model_type}_meta.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path) as f:
+                        num_classes = json.load(f).get("num_classes", 2)
+                except Exception:
+                    pass
+        return weights_path, num_classes

@@ -116,21 +116,20 @@ def handle_frame(data):
 
 
 def _push_task_update(task_id: int):
-    """向房间广播任务出勤统计快照"""
+    """向房间广播任务出勤统计快照（SocketIO 事件处理器内部已有 app context）"""
     try:
         from app.models.attendance import AttendanceTask
-        with current_app.app_context():
-            task = db.session.get(AttendanceTask, task_id)
-            if task:
-                socketio.emit(
-                    "task_update",
-                    {
-                        "task_id": task_id,
-                        "status": task.status,
-                        "present_count": task.present_count or 0,
-                        "total_students": task.total_students or 0,
-                    },
-                    room=f"task_{task_id}",
-                )
+        task = db.session.get(AttendanceTask, task_id)
+        if task:
+            socketio.emit(
+                "task_update",
+                {
+                    "task_id": task_id,
+                    "status": task.status,
+                    "present_count": task.present_count or 0,
+                    "total_students": task.total_students or 0,
+                },
+                room=f"task_{task_id}",
+            )
     except Exception as e:
         logger.error("Failed to push task_update: %s", e)

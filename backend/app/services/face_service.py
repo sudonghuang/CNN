@@ -7,6 +7,10 @@ from flask import current_app
 from app.extensions import db
 from app.models.student import Student, FaceImage
 
+# 进程级训练任务状态表（key: job_id）
+_training_jobs: dict = {}
+_jobs_lock = threading.Lock()
+
 
 class FaceService:
     def _save_bytes_to_disk(self, student_db_id: int, image_bytes: bytes,
@@ -41,20 +45,18 @@ class FaceService:
         """检测人脸 → 写库 → 更新 face_count"""
         try:
             from app.ai.model_manager import ModelManager
-            mgr = ModelManager.get_instance()
             import cv2
-            import numpy as np
             img = cv2.imread(filepath)
             if img is None:
                 os.remove(filepath)
                 return {"ok": False, "code": 422, "message": "图片读取失败"}
-            bboxes = mgr.detector.detect(img)
+            bboxes = ModelManager.get_instance().detector.detect(img)
             if not bboxes:
                 os.remove(filepath)
                 return {"ok": False, "code": 422, "message": "未检测到人脸，请上传正面清晰照片"}
         except Exception as e:
             current_app.logger.warning("Face detection skipped: %s", e)
-            # 检测依赖未就绪时跳过检测，仍保存图片
+
         face_img = FaceImage(student_id=student.id, file_path=filepath,
                              is_processed=True)
         db.session.add(face_img)
@@ -88,8 +90,19 @@ class FaceService:
         db.session.commit()
         return {"ok": True}
 
+    # ── 模型训练 ─────────────────────────────────────────────────
+
     def trigger_training(self, model_type: str) -> dict:
         job_id = uuid.uuid4().hex[:8]
+        with _jobs_lock:
+            _training_jobs[job_id] = {
+                "status": "running",
+                "model_type": model_type,
+                "started_at": datetime.now().isoformat(),
+                "finished_at": None,
+                "result": None,
+                "error": None,
+            }
         t = threading.Thread(
             target=self._run_training,
             args=(model_type, job_id, current_app._get_current_object()),
@@ -102,9 +115,33 @@ class FaceService:
         with app.app_context():
             try:
                 from model.train import run_training
-                run_training(model_type)
+                result = run_training(model_type)
                 from app.ai.model_manager import ModelManager
-                ModelManager.get_instance().reload_feature_db()
-                app.logger.info("Training job %s finished", job_id)
+                mgr = ModelManager.get_instance()
+                mgr.reload_feature_db()
+                mgr.reload_recognizer()
+                with _jobs_lock:
+                    _training_jobs[job_id].update({
+                        "status": "done",
+                        "finished_at": datetime.now().isoformat(),
+                        "result": result,
+                    })
+                app.logger.info("Training job %s finished: %s", job_id, result)
             except Exception as e:
+                with _jobs_lock:
+                    _training_jobs[job_id].update({
+                        "status": "failed",
+                        "finished_at": datetime.now().isoformat(),
+                        "error": str(e),
+                    })
                 app.logger.error("Training job %s failed: %s", job_id, e)
+
+    def get_training_status(self, job_id: str) -> dict:
+        job = _training_jobs.get(job_id)
+        if job is None:
+            return {"ok": False, "code": 404, "message": "训练任务不存在"}
+        return {"ok": True, "data": {"job_id": job_id, **job}}
+
+    def list_training_jobs(self) -> list:
+        with _jobs_lock:
+            return [{"job_id": k, **v} for k, v in _training_jobs.items()]

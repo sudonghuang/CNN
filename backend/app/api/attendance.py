@@ -47,6 +47,21 @@ def get_task(task_id):
     return error("考勤任务不存在", 404)
 
 
+@bp.delete("/tasks/<int:task_id>")
+@require_roles("admin", "teacher")
+def delete_task(task_id):
+    from app.models.attendance import AttendanceTask
+    task = AttendanceTask.query.get(task_id)
+    if not task:
+        return error("考勤任务不存在", 404)
+    if task.status != "pending":
+        return error("只能删除待开始的任务", 409)
+    from app.extensions import db
+    db.session.delete(task)
+    db.session.commit()
+    return success({"id": task_id})
+
+
 @bp.post("/tasks/<int:task_id>/start")
 @require_roles("admin", "teacher")
 def start_task(task_id):

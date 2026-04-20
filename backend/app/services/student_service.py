@@ -94,7 +94,8 @@ class StudentService:
             if Student.query.filter_by(student_id=student_id).first():
                 errors.append(f"第{row_num}行：学号 {student_id} 已存在")
                 continue
-            dept = str(row[idx.get("院系", -1)]).strip() if idx.get("院系") is not None and row[idx.get("院系", -1)] else ""
+            dept_col = idx.get("院系")
+            dept = str(row[dept_col]).strip() if dept_col is not None and row[dept_col] else ""
             db.session.add(Student(student_id=student_id, name=name,
                                    class_name=class_name, department=dept))
             success_count += 1

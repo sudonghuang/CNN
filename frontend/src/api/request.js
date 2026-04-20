@@ -19,14 +19,16 @@ request.interceptors.response.use(
     const message = err.response?.data?.message || '网络错误，请重试'
 
     if (code === 401) {
-      // silent:true 的请求（非关键接口）不触发跳转
       if (!err.config?.silent) {
         localStorage.removeItem('token')
         localStorage.removeItem('userInfo')
         window.location.href = '/login'
       }
     } else if (code === 403) {
-      ElMessage.warning('权限不足')
+      // silent 请求（如仪表盘后台探针）不弹权限提示
+      if (!err.config?.silent) {
+        ElMessage.warning('权限不足')
+      }
     } else if (code === 404) {
       // 静默忽略
     } else if (code >= 500) {

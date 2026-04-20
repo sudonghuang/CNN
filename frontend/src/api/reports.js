@@ -1,5 +1,6 @@
 import request from './request'
 export const reportsApi = {
+  stats: () => request.get('/reports/stats', { silent: true }),
   courseStats: (courseId, params) =>
     request.get(`/reports/course/${courseId}`, { params }),
   studentHistory: (studentId) =>

@@ -46,6 +46,13 @@ def export_excel():
     )
 
 
+@bp.get("/stats")
+@require_auth
+def dashboard_stats():
+    """仪表盘统计数据"""
+    return success(_svc.get_dashboard_stats())
+
+
 @bp.get("/warnings")
 @require_roles("admin", "counselor")
 def get_warnings():

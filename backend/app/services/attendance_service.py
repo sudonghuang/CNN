@@ -128,6 +128,10 @@ class AttendanceService:
             recognized_at=datetime.utcnow(),
         )
         db.session.add(rec)
+        # 实时更新 task.present_count，供 WebSocket task_update 使用
+        task = AttendanceTask.query.get(task_id)
+        if task and recognition.get("status") in ("present", "unverified"):
+            task.present_count = (task.present_count or 0) + 1
         db.session.commit()
 
     # ── 查询与修正 ─────────────────────────────────────────────
@@ -140,6 +144,18 @@ class AttendanceService:
             q = q.filter_by(teacher_id=int(filters["teacher_id"]))
         if filters.get("status"):
             q = q.filter_by(status=filters["status"])
+        if filters.get("date_from"):
+            try:
+                from datetime import date
+                q = q.filter(AttendanceTask.task_date >= date.fromisoformat(filters["date_from"]))
+            except ValueError:
+                pass
+        if filters.get("date_to"):
+            try:
+                from datetime import date
+                q = q.filter(AttendanceTask.task_date <= date.fromisoformat(filters["date_to"]))
+            except ValueError:
+                pass
         pagination = q.order_by(AttendanceTask.created_at.desc()).paginate(
             page=page, per_page=per_page, error_out=False
         )
@@ -156,14 +172,25 @@ class AttendanceService:
         return data
 
     def get_records(self, page: int, per_page: int, filters: dict) -> dict:
+        from app.models.student import Student
+        from app.models.user import User
         q = AttendanceRecord.query
         if filters.get("task_id"):
             q = q.filter_by(task_id=int(filters["task_id"]))
         if filters.get("status"):
             q = q.filter_by(status=filters["status"])
+        if filters.get("course_id"):
+            q = q.join(AttendanceTask, AttendanceRecord.task_id == AttendanceTask.id)\
+                 .filter(AttendanceTask.course_id == int(filters["course_id"]))
+        if filters.get("date_from"):
+            try:
+                from datetime import date
+                q = q.join(AttendanceTask, AttendanceRecord.task_id == AttendanceTask.id,
+                           isouter=True)\
+                     .filter(AttendanceTask.task_date >= date.fromisoformat(filters["date_from"]))
+            except (ValueError, Exception):
+                pass
         if filters.get("current_user_id"):
-            from app.models.student import Student
-            from app.models.user import User
             user = User.query.get(int(filters["current_user_id"]))
             if user:
                 st = Student.query.filter_by(user_id=user.id).first()

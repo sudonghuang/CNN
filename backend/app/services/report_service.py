@@ -138,6 +138,27 @@ class ReportService:
             for st, absent in rows
         ]
 
+    def get_dashboard_stats(self) -> dict:
+        """仪表盘快速统计：学生总数 / 今日任务 / 今日出勤率 / 待核实记录"""
+        from datetime import date as _date
+        from sqlalchemy import func
+        student_count = db.session.query(func.count(Student.id)).scalar() or 0
+        today = _date.today()
+        today_tasks = AttendanceTask.query.filter_by(task_date=today).all()
+        today_task_count = len(today_tasks)
+        total_s = sum(t.total_students or 0 for t in today_tasks)
+        present_s = sum(t.present_count or 0 for t in today_tasks)
+        today_rate = round(present_s / total_s, 4) if total_s else 0.0
+        unverified_count = AttendanceRecord.query.filter_by(
+            status="unverified"
+        ).count()
+        return {
+            "student_count": student_count,
+            "today_task_count": today_task_count,
+            "today_attendance_rate": today_rate,
+            "unverified_count": unverified_count,
+        }
+
     def check_and_generate_warnings(self) -> int:
         """定时任务调用：返回新增预警数"""
         warnings = self.get_warnings()

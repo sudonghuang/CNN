@@ -13,6 +13,10 @@
           <el-icon><DataBoard /></el-icon><span>数据概览</span>
         </el-menu-item>
 
+        <el-menu-item v-if="hasRole(['admin'])" index="/users">
+          <el-icon><UserFilled /></el-icon><span>用户管理</span>
+        </el-menu-item>
+
         <el-sub-menu v-if="hasRole(['admin','teacher','counselor'])" index="students">
           <template #title><el-icon><User /></el-icon><span>学生管理</span></template>
           <el-menu-item index="/students">学生列表</el-menu-item>
@@ -23,10 +27,14 @@
           <el-icon><Camera /></el-icon><span>人脸数据管理</span>
         </el-menu-item>
 
-        <el-sub-menu index="attendance">
+        <el-sub-menu v-if="hasRole(['admin','teacher','counselor'])" index="attendance">
           <template #title><el-icon><Checked /></el-icon><span>考勤管理</span></template>
           <el-menu-item index="/attendance/tasks">考勤任务</el-menu-item>
         </el-sub-menu>
+
+        <el-menu-item v-if="hasRole(['student'])" index="/attendance/my">
+          <el-icon><Checked /></el-icon><span>我的考勤</span>
+        </el-menu-item>
 
         <el-menu-item v-if="hasRole(['admin','teacher','counselor'])" index="/reports">
           <el-icon><TrendCharts /></el-icon><span>报表统计</span>
@@ -53,6 +61,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { UserFilled } from '@element-plus/icons-vue'
 
 const auth = useAuthStore()
 const ROLE_MAP = { admin: '管理员', teacher: '教师', counselor: '辅导员', student: '学生' }

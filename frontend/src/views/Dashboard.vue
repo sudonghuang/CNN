@@ -45,7 +45,7 @@ use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer
 
 const stats = ref([
   { label: '学生总数', value: '--' },
-  { label: '今日考勤', value: '--' },
+  { label: '今日考勤场次', value: '--' },
   { label: '今日出勤率', value: '--' },
   { label: '待核实记录', value: '--' },
 ])
@@ -58,30 +58,39 @@ const lineOption = ref({
 })
 
 onMounted(async () => {
+  // 一次性获取仪表盘统计
+  try {
+    const res = await reportsApi.stats()
+    const d = res.data || {}
+    stats.value[0].value = d.student_count ?? '--'
+    stats.value[1].value = d.today_task_count != null ? d.today_task_count + '场' : '--'
+    stats.value[2].value = d.today_attendance_rate != null
+      ? (d.today_attendance_rate * 100).toFixed(1) + '%' : '--'
+    stats.value[3].value = d.unverified_count ?? '--'
+  } catch { /* ignore */ }
+
   // 缺勤预警
   try {
     const res = await reportsApi.warnings()
     warnings.value = res.data?.slice(0, 5) || []
   } catch { /* ignore */ }
 
-  // 今日统计（近7日出勤趋势使用第一门课程数据）
+  // 近7日出勤趋势（仅 admin/teacher/counselor 可访问）
   try {
     const { attendanceApi } = await import('@/api/attendance')
-    const tasksRes = await attendanceApi.listTasks({ per_page: 1 })
-    const today = new Date().toISOString().slice(0, 10)
-    const todayTasks = tasksRes.data?.items?.filter(t => t.task_date === today) || []
-    const totalPresent = todayTasks.reduce((s, t) => s + (t.present_count || 0), 0)
-    const totalStudents = todayTasks.reduce((s, t) => s + (t.total_students || 0), 0)
-    stats.value[1].value = todayTasks.length + '场'
-    stats.value[2].value = totalStudents
-      ? (totalPresent / totalStudents * 100).toFixed(1) + '%' : '--'
-  } catch { /* ignore */ }
-
-  // 学生总数
-  try {
-    const { studentsApi } = await import('@/api/students')
-    const sRes = await studentsApi.list({ per_page: 1 })
-    stats.value[0].value = sRes.data?.pagination?.total ?? '--'
+    const res = await attendanceApi.listTasks({ per_page: 7, status: 'finished', silent: true })
+    const items = res.data?.items?.slice().reverse() || []
+    lineOption.value = {
+      ...lineOption.value,
+      xAxis: { type: 'category', data: items.map(t => t.task_date) },
+      series: [{
+        name: '出勤率', type: 'line', smooth: true,
+        data: items.map(t => t.total_students
+          ? +((t.present_count / t.total_students) * 100).toFixed(1) : 0),
+        itemStyle: { color: '#409eff' },
+        areaStyle: { opacity: 0.1 },
+      }],
+    }
   } catch { /* ignore */ }
 })
 </script>

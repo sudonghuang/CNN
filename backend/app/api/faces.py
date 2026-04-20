@@ -61,6 +61,8 @@ def delete_face(image_id):
     return error(result["message"], result["code"])
 
 
+# ── 训练管理 ──────────────────────────────────────────────────────
+
 @bp.post("/train")
 @require_roles("admin")
 def trigger_training():
@@ -70,4 +72,45 @@ def trigger_training():
     result = _svc.trigger_training(model_type)
     if result["ok"]:
         return success({"job_id": result.get("job_id")}, "训练任务已提交")
+    return error(result["message"], result.get("code", 500))
+
+
+@bp.get("/train/jobs")
+@require_roles("admin")
+def training_jobs():
+    """列出所有训练任务"""
+    return success(_svc.list_training_jobs())
+
+
+@bp.get("/train/jobs/<job_id>")
+@require_roles("admin")
+def training_status(job_id):
+    """查询单个训练任务状态"""
+    result = _svc.get_training_status(job_id)
+    if result["ok"]:
+        return success(result["data"])
     return error(result["message"], result["code"])
+
+
+@bp.get("/file/<int:image_id>")
+def get_face_file(image_id):
+    """直接返回人脸图片文件（供前端 <img> 标签使用）"""
+    import os
+    from flask import send_file
+    from app.models.student import FaceImage
+    img = FaceImage.query.get(image_id)
+    if not img or not os.path.exists(img.file_path):
+        return error("文件不存在", 404)
+    return send_file(img.file_path)
+
+
+@bp.get("/model/info")
+@require_roles("admin")
+def model_info():
+    """获取当前 AI 模型状态"""
+    try:
+        from app.ai.model_manager import ModelManager
+        info = ModelManager.get_instance().get_model_info()
+        return success(info)
+    except Exception as e:
+        return error(f"模型未初始化: {e}", 503)

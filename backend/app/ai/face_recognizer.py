@@ -1,4 +1,9 @@
-"""CNN 特征提取器（VGG16 / ResNet50）"""
+"""CNN 特征提取器（VGG16 / ResNet50）
+
+推理架构与 model/train.py build_model 保持一致：
+  VGG16   : features → avgpool → flatten → classifier[0-4] → 512-dim
+  ResNet50: backbone → flatten → fc[0-1]                  → 512-dim
+"""
 from __future__ import annotations
 import torch
 import torch.nn as nn
@@ -7,42 +12,105 @@ import numpy as np
 from typing import List
 
 
+class _VGG16Embedder(nn.Module):
+    """VGG16 推理包装：forward 在 512-dim embedding 处截断（去掉最终分类层）"""
+
+    def __init__(self, base: nn.Module):
+        super().__init__()
+        self.features = base.features
+        self.avgpool = base.avgpool
+        self.classifier = base.classifier  # 与 train.py build_model 完全相同的 Sequential
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        # classifier: [0]L(25088,4096) [1]ReLU [2]Dropout
+        #             [3]L(4096,512)   [4]ReLU [5]Dropout [6]L(512,C)
+        # 取前 5 层（index 0-4）→ 512-dim
+        for layer in list(self.classifier.children())[:5]:
+            x = layer(x)
+        return x
+
+
+class _ResNet50Embedder(nn.Module):
+    """ResNet50 推理包装：forward 在 512-dim embedding 处截断"""
+
+    def __init__(self, base: nn.Module):
+        super().__init__()
+        for name in ("conv1", "bn1", "relu", "maxpool",
+                     "layer1", "layer2", "layer3", "layer4",
+                     "avgpool", "fc"):
+            setattr(self, name, getattr(base, name))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        # fc: [0]L(2048,512) [1]ReLU [2]Dropout [3]L(512,C)
+        # 取前 2 层（index 0-1）→ 512-dim
+        for layer in list(self.fc.children())[:2]:
+            x = layer(x)
+        return x
+
+
 class FaceRecognizer:
-    """加载预训练 CNN，去掉分类头，输出 L2 归一化特征向量"""
+    """加载预训练 CNN，输出 L2 归一化 512-dim 特征向量"""
 
     SUPPORTED = ("vgg16", "resnet50")
 
     def __init__(self, model_type: str, weights_path: str = None,
-                 device: str = "cpu"):
+                 device: str = "cpu", num_classes: int = 2):
         if model_type not in self.SUPPORTED:
             raise ValueError(f"model_type must be one of {self.SUPPORTED}")
         self.model_type = model_type
         self.device = torch.device(device)
-        self.model = self._build_model(model_type)
         if weights_path:
-            state = torch.load(weights_path, map_location=self.device)
+            state = torch.load(weights_path, map_location=self.device,
+                               weights_only=True)
+            # Auto-detect num_classes from checkpoint to avoid shape mismatch
+            num_classes = self._detect_num_classes(state, model_type, num_classes)
+        else:
+            state = None
+        self.model = self._build_model(model_type, num_classes)
+        if state is not None:
             self.model.load_state_dict(state, strict=False)
         self.model.to(self.device)
         self.model.eval()
 
-    def _build_model(self, model_type: str) -> nn.Module:
+    @staticmethod
+    def _detect_num_classes(state_dict: dict, model_type: str, default: int) -> int:
+        """从 state_dict 中读取分类层权重形状，推断 num_classes"""
+        key = "classifier.6.weight" if model_type == "vgg16" else "fc.3.weight"
+        if key in state_dict:
+            return int(state_dict[key].shape[0])
+        return default
+
+    def _build_model(self, model_type: str, num_classes: int) -> nn.Module:
+        """构建与 train.py build_model 完全相同的分类头，再套上 Embedder 包装"""
         import torchvision.models as tvm
         if model_type == "vgg16":
             base = tvm.vgg16(weights=None)
-            # 去掉 classifier，只保留 features + avgpool
-            backbone = nn.Sequential(
-                base.features,
-                base.avgpool,
-                nn.Flatten(),
-                nn.Linear(25088, 512),
-                nn.BatchNorm1d(512),
-                nn.ReLU(inplace=True),
+            base.classifier = nn.Sequential(
+                nn.Linear(25088, 4096), nn.ReLU(True), nn.Dropout(0.5),
+                nn.Linear(4096, 512),   nn.ReLU(True), nn.Dropout(0.5),
+                nn.Linear(512, num_classes),
             )
+            return _VGG16Embedder(base)
         else:  # resnet50
             base = tvm.resnet50(weights=None)
-            base.fc = nn.Linear(2048, 512)
-            backbone = base
-        return backbone
+            base.fc = nn.Sequential(
+                nn.Linear(2048, 512), nn.ReLU(True), nn.Dropout(0.3),
+                nn.Linear(512, num_classes),
+            )
+            return _ResNet50Embedder(base)
 
     @torch.no_grad()
     def extract_features(self, face_tensor: torch.Tensor) -> np.ndarray:

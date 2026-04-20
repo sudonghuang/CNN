@@ -19,6 +19,13 @@ const routes = [
         component: () => import('@/views/Dashboard.vue'),
         meta: { title: '数据概览' },
       },
+      // 用户管理
+      {
+        path: 'users',
+        name: 'UserList',
+        component: () => import('@/views/users/UserList.vue'),
+        meta: { title: '用户管理', roles: ['admin'] },
+      },
       // 学生管理
       {
         path: 'students',
@@ -56,13 +63,20 @@ const routes = [
         path: 'attendance/tasks',
         name: 'AttendanceList',
         component: () => import('@/views/attendance/AttendanceList.vue'),
-        meta: { title: '考勤任务' },
+        meta: { title: '考勤任务', roles: ['admin', 'teacher', 'counselor'] },
       },
       {
         path: 'attendance/tasks/:id',
         name: 'AttendanceTask',
         component: () => import('@/views/attendance/AttendanceTask.vue'),
         meta: { title: '实时考勤', roles: ['admin', 'teacher'] },
+      },
+      // 学生：我的考勤记录
+      {
+        path: 'attendance/my',
+        name: 'MyAttendance',
+        component: () => import('@/views/attendance/MyAttendance.vue'),
+        meta: { title: '我的考勤' },
       },
       // 报表
       {
