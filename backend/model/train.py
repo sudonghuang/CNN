@@ -50,9 +50,11 @@ def build_model(model_type: str, num_classes: int, pretrained: bool = True):
     if model_type == "vgg16":
         weights = models.VGG16_Weights.IMAGENET1K_V1 if pretrained else None
         model = models.vgg16(weights=weights)
+        # GAP：将 7×7 池化替换为全局平均池化，输出从 25088 降至 512
+        # 分类头参数量：~26万（原 ~1.08亿），可使用 batch_size=32
+        model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         model.classifier = nn.Sequential(
-            nn.Linear(25088, 4096), nn.ReLU(True), nn.Dropout(0.5),
-            nn.Linear(4096, 512),   nn.ReLU(True), nn.Dropout(0.5),
+            nn.Linear(512, 512), nn.ReLU(True), nn.Dropout(0.4),
             nn.Linear(512, num_classes),
         )
     elif model_type == "resnet50":
@@ -93,9 +95,9 @@ def _forward_embedding(model, model_type: str, x: torch.Tensor) -> torch.Tensor:
         h = model.features(x)
         h = model.avgpool(h)
         h = torch.flatten(h, 1)
-        # classifier: [0]L(25088,4096) [1]ReLU [2]Dropout
-        #             [3]L(4096,512)   [4]ReLU [5]Dropout [6]L(512,C)
-        for layer in list(model.classifier.children())[:5]:
+        # GAP后 classifier: [0]L(512,512) [1]ReLU [2]Dropout [3]L(512,C)
+        # 取前 2 层（index 0-1）→ 512-dim embedding
+        for layer in list(model.classifier.children())[:2]:
             h = layer(h)
     else:  # resnet50
         h = model.conv1(x); h = model.bn1(h); h = model.relu(h)
@@ -123,9 +125,11 @@ def _eval_epoch(model, loader, device):
 
 
 def run_training(model_type: str = "resnet50", epochs: int = 30,
-                 batch_size: int = 32, lr: float = 1e-4) -> dict:
+                 batch_size: int = 32, lr: float = 1e-4,
+                 resume: bool = False, grad_accum: int = 1) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Training %s on %s", model_type, device)
+    logger.info("Training %s on %s  resume=%s  grad_accum=%d",
+                model_type, device, resume, grad_accum)
 
     # 优先使用 prepare_lfw.py 划分好的 train/val 子目录，否则回退到旧的随机 split
     if os.path.isdir(TRAIN_DIR) and os.path.isdir(VAL_DIR):
@@ -159,17 +163,89 @@ def run_training(model_type: str = "resnet50", epochs: int = 30,
     num_classes = len(train_ds.classes) if hasattr(train_ds, "classes") else len(full_ds.classes)
     logger.info("Classes: %d  Train: %d  Val: %d", num_classes, len(train_ds), len(val_ds))
 
-    model = build_model(model_type, num_classes).to(device)
+    model = build_model(model_type, num_classes, pretrained=not resume).to(device)
     criterion = nn.CrossEntropyLoss()
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-    # ── 阶段一：冻结主干，仅训练分类头（前 1/3 轮） ───────────────────
+    # ── Resume 模式：从已有检查点继续 Phase 2 微调 ──────────────────────
+    if resume:
+        ckpt_path = os.path.join(CHECKPOINT_DIR, f"{model_type}_best.pth")
+        if not os.path.exists(ckpt_path):
+            logger.error("Resume requested but checkpoint not found: %s", ckpt_path)
+            return {"error": "checkpoint not found"}
+        model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+
+        # 读取已保存的最优指标，避免覆盖更好的历史结果
+        meta_path = os.path.join(CHECKPOINT_DIR, f"{model_type}_meta.json")
+        prev_best = 0.0
+        if os.path.exists(meta_path):
+            with open(meta_path) as f:
+                prev = json.load(f)
+            prev_best = prev.get("best_acc", 0.0)
+
+        # 先在验证集上测一下当前 checkpoint 的实际 val_acc
+        cur_val = _eval_epoch(model, val_loader, device)
+        best_acc  = max(prev_best, cur_val)
+        best_epoch = 0
+        logger.info("Resumed from %s  checkpoint_val_acc=%.4f  best_acc_so_far=%.4f",
+                    ckpt_path, cur_val, best_acc)
+
+        _unfreeze_all(model)
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=1e-6)
+        logger.info("Phase 2 (resume): SGD lr=%.2e, CosineAnnealing T_max=%d", lr, epochs)
+
+        for epoch in range(1, epochs + 1):
+            model.train()
+            correct, total, running_loss = 0, 0, 0.0
+            optimizer.zero_grad()
+            for step, (imgs, labels) in enumerate(train_loader, 1):
+                imgs, labels = imgs.to(device), labels.to(device)
+                out  = model(imgs)
+                loss = criterion(out, labels) / grad_accum
+                loss.backward()
+                running_loss += loss.item() * grad_accum
+                correct += (out.argmax(1) == labels).sum().item()
+                total   += labels.size(0)
+                if step % grad_accum == 0 or step == len(train_loader):
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+            train_acc = correct / total
+            val_acc   = _eval_epoch(model, val_loader, device)
+            scheduler.step()
+            cur_lr = optimizer.param_groups[0]["lr"]
+            logger.info("Epoch %d/%d  lr=%.2e  loss=%.4f  train_acc=%.4f  val_acc=%.4f",
+                        epoch, epochs, cur_lr,
+                        running_loss / len(train_loader), train_acc, val_acc)
+
+            if val_acc > best_acc:
+                best_acc = val_acc
+                best_epoch = epoch
+                ckpt = os.path.join(CHECKPOINT_DIR, f"{model_type}_best.pth")
+                torch.save(model.state_dict(), ckpt)
+                logger.info("★ New best checkpoint: val_acc=%.4f", best_acc)
+
+        meta = {"num_classes": num_classes, "best_acc": best_acc, "best_epoch": best_epoch,
+                "model_type": model_type}
+        with open(os.path.join(CHECKPOINT_DIR, f"{model_type}_meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        logger.info("Meta saved: %s", meta)
+
+        del optimizer, train_loader, val_loader
+        import gc; gc.collect()
+        best_ckpt = os.path.join(CHECKPOINT_DIR, f"{model_type}_best.pth")
+        model.load_state_dict(torch.load(best_ckpt, map_location=device, weights_only=True))
+        _extract_feature_db(model, model_type, full_ds, device)
+        return {"best_acc": best_acc, "best_epoch": best_epoch, "num_classes": num_classes}
+
+    # ── 正常训练模式（从头开始，两阶段迁移学习） ───────────────────────
     # Phase 1 用较高固定 LR（不衰减），让分类头在 ImageNet 特征上快速收敛
-    # 不使用 StepLR：避免 LR 在 phase 1 结束时降到 1e-6 导致学习停滞
     freeze_epochs = max(1, epochs // 3)
     _freeze_backbone(model, model_type)
     head_params = [p for p in model.parameters() if p.requires_grad]
-    phase1_lr = max(lr * 10, 1e-3)   # phase 1 用更高 LR：1e-3
+    phase1_lr = max(lr * 10, 1e-3)
     optimizer = optim.Adam(head_params, lr=phase1_lr)
     scheduler = None
     logger.info("Phase 1: freeze backbone, train head for %d epochs (lr=%.2e)",
@@ -291,6 +367,11 @@ if __name__ == "__main__":
     parser.add_argument("--epochs",     type=int,   default=30)
     parser.add_argument("--batch-size", type=int,   default=16)
     parser.add_argument("--lr",         type=float, default=1e-4)
+    parser.add_argument("--resume",     action="store_true",
+                        help="从已有最优检查点继续 Phase 2 微调，跳过 Phase 1")
+    parser.add_argument("--grad-accum", type=int,   default=1,
+                        help="梯度累积步数（模拟更大 batch_size）")
     args = parser.parse_args()
-    result = run_training(args.model, args.epochs, args.batch_size, args.lr)
+    result = run_training(args.model, args.epochs, args.batch_size, args.lr,
+                          resume=args.resume, grad_accum=args.grad_accum)
     logger.info("Training complete: %s", result)

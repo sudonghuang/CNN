@@ -1,8 +1,8 @@
 """CNN 特征提取器（VGG16 / ResNet50）
 
 推理架构与 model/train.py build_model 保持一致：
-  VGG16   : features → avgpool → flatten → classifier[0-4] → 512-dim
-  ResNet50: backbone → flatten → fc[0-1]                  → 512-dim
+  VGG16   : features → GAP(1×1) → flatten → classifier[0-1] → 512-dim
+  ResNet50: backbone → flatten  → fc[0-1]                   → 512-dim
 """
 from __future__ import annotations
 import torch
@@ -23,12 +23,11 @@ class _VGG16Embedder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        # classifier: [0]L(25088,4096) [1]ReLU [2]Dropout
-        #             [3]L(4096,512)   [4]ReLU [5]Dropout [6]L(512,C)
-        # 取前 5 层（index 0-4）→ 512-dim
-        for layer in list(self.classifier.children())[:5]:
+        x = self.avgpool(x)          # GAP → (B, 512, 1, 1)
+        x = torch.flatten(x, 1)      # → (B, 512)
+        # GAP后 classifier: [0]L(512,512) [1]ReLU [2]Dropout [3]L(512,C)
+        # 取前 2 层（index 0-1）→ 512-dim embedding
+        for layer in list(self.classifier.children())[:2]:
             x = layer(x)
         return x
 
@@ -88,7 +87,7 @@ class FaceRecognizer:
     @staticmethod
     def _detect_num_classes(state_dict: dict, model_type: str, default: int) -> int:
         """从 state_dict 中读取分类层权重形状，推断 num_classes"""
-        key = "classifier.6.weight" if model_type == "vgg16" else "fc.3.weight"
+        key = "classifier.3.weight" if model_type == "vgg16" else "fc.3.weight"
         if key in state_dict:
             return int(state_dict[key].shape[0])
         return default
@@ -98,9 +97,9 @@ class FaceRecognizer:
         import torchvision.models as tvm
         if model_type == "vgg16":
             base = tvm.vgg16(weights=None)
+            base.avgpool = nn.AdaptiveAvgPool2d((1, 1))   # GAP
             base.classifier = nn.Sequential(
-                nn.Linear(25088, 4096), nn.ReLU(True), nn.Dropout(0.5),
-                nn.Linear(4096, 512),   nn.ReLU(True), nn.Dropout(0.5),
+                nn.Linear(512, 512), nn.ReLU(True), nn.Dropout(0.4),
                 nn.Linear(512, num_classes),
             )
             return _VGG16Embedder(base)
