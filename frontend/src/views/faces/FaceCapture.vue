@@ -104,6 +104,7 @@ async function captureFrame() {
 
 function stopCamera() {
   mediaStream?.getTracks().forEach(t => t.stop())
+  if (videoRef.value) videoRef.value.srcObject = null
   streaming.value = false; captureCount.value = 0
 }
 

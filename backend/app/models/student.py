@@ -49,7 +49,7 @@ class StudentCourse(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False)
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False)
-    semester = db.Column(db.String(20))
+    semester = db.Column(db.String(20), nullable=False, default="")
 
 
 class FaceImage(db.Model):

@@ -21,9 +21,12 @@ def course_stats(course_id):
 @bp.get("/student/<int:student_id>")
 @require_auth
 def student_history(student_id):
-    # 学生只能查自己
-    if g.current_role == "student" and g.current_user_id != student_id:
-        return error("无权限查看他人记录", 403)
+    # 学生只能查自己：通过 user_id 找到对应的 student.id 再比对
+    if g.current_role == "student":
+        from app.models.student import Student
+        own = Student.query.filter_by(user_id=g.current_user_id).first()
+        if own is None or own.id != student_id:
+            return error("无权限查看他人记录", 403)
     result = _svc.get_student_history(student_id)
     return success(result)
 

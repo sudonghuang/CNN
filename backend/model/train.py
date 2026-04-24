@@ -10,10 +10,11 @@ import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision import datasets, transforms, models
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,13 @@ def get_transforms(is_train: bool):
             transforms.Resize((256, 256)),
             transforms.RandomCrop(224),
             transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2),
-            transforms.RandomRotation(15),
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.3, hue=0.05),
+            transforms.RandomGrayscale(p=0.1),
+            transforms.RandomAffine(degrees=20, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            transforms.RandomErasing(p=0.2, scale=(0.02, 0.15), ratio=(0.3, 3.3)),
         ])
     return transforms.Compose([
         transforms.Resize((224, 224)),
@@ -156,15 +160,27 @@ def run_training(model_type: str = "resnet50", epochs: int = 30,
 
     # CPU 训练：num_workers=0 避免进程间通信开销，pin_memory 仅对 GPU 有效
     use_workers = 0 if not torch.cuda.is_available() else 2
-    train_loader = DataLoader(train_ds, batch_size=batch_size,
-                              shuffle=True,  num_workers=use_workers)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size,
-                              shuffle=False, num_workers=use_workers)
     num_classes = len(train_ds.classes) if hasattr(train_ds, "classes") else len(full_ds.classes)
     logger.info("Classes: %d  Train: %d  Val: %d", num_classes, len(train_ds), len(val_ds))
 
+    # 类别不平衡处理：计算每类样本数，构建加权随机采样器和加权损失
+    targets = [s[1] for s in train_ds.imgs] if hasattr(train_ds, "imgs") else \
+              [train_ds.dataset.targets[i] for i in train_ds.indices]
+    class_counts = np.bincount(targets, minlength=num_classes).astype(np.float32)
+    class_counts = np.maximum(class_counts, 1)
+    sample_weights = 1.0 / class_counts[targets]
+    sampler = WeightedRandomSampler(sample_weights, num_samples=len(targets), replacement=True)
+    class_weights = torch.tensor(1.0 / class_counts, dtype=torch.float)
+    logger.info("Class imbalance  max/min ratio=%.1f  WeightedSampler+WeightedLoss enabled",
+                class_counts.max() / class_counts.min())
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size,
+                              sampler=sampler, num_workers=use_workers)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size,
+                              shuffle=False, num_workers=use_workers)
+
     model = build_model(model_type, num_classes, pretrained=not resume).to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # ── Resume 模式：从已有检查点继续 Phase 2 微调 ──────────────────────

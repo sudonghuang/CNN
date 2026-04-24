@@ -109,7 +109,7 @@ class AttendanceService:
 
     def _record_if_new(self, task_id: int, recognition: dict) -> None:
         student_db_id = recognition.get("student_db_id")
-        if student_db_id is None:
+        if not student_db_id or student_db_id <= 0:
             return
         cache = _recognized_cache.setdefault(task_id, set())
         if student_db_id in cache:
@@ -179,17 +179,16 @@ class AttendanceService:
             q = q.filter_by(task_id=int(filters["task_id"]))
         if filters.get("status"):
             q = q.filter_by(status=filters["status"])
-        if filters.get("course_id"):
-            q = q.join(AttendanceTask, AttendanceRecord.task_id == AttendanceTask.id)\
-                 .filter(AttendanceTask.course_id == int(filters["course_id"]))
-        if filters.get("date_from"):
-            try:
-                from datetime import date
-                q = q.join(AttendanceTask, AttendanceRecord.task_id == AttendanceTask.id,
-                           isouter=True)\
-                     .filter(AttendanceTask.task_date >= date.fromisoformat(filters["date_from"]))
-            except (ValueError, Exception):
-                pass
+        if filters.get("course_id") or filters.get("date_from"):
+            q = q.join(AttendanceTask, AttendanceRecord.task_id == AttendanceTask.id)
+            if filters.get("course_id"):
+                q = q.filter(AttendanceTask.course_id == int(filters["course_id"]))
+            if filters.get("date_from"):
+                try:
+                    from datetime import date
+                    q = q.filter(AttendanceTask.task_date >= date.fromisoformat(filters["date_from"]))
+                except (ValueError, Exception):
+                    pass
         if filters.get("current_user_id"):
             user = User.query.get(int(filters["current_user_id"]))
             if user:

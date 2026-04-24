@@ -57,3 +57,6 @@ htmlcov/
 # 临时文件
 /tmp/
 *.tmp
+backend/model/lfw_raw/
+backend/model/checkpoints/*.pth
+docs/output/抽检材料_苏东煌.zip
